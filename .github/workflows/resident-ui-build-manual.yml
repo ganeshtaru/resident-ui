@@ -1,10 +1,10 @@
 name: Resident UI Manual Push
 
-on:
-  workflow_dispatch:
+on: workflow_dispatch
 
 jobs:
-  build-resident-ui:
+  build:
+
     runs-on: ubuntu-latest
     env:
       NAMESPACE: ${{ secrets.dev_namespace_docker_hub }}
@@ -13,34 +13,60 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v3
-
-      - name: npm install
-        run: cd ${{ env.SERVICE_LOCATION }} && npm install --ignore-scripts
-
-      - name: npm build
-        run: cd ${{ env.SERVICE_LOCATION }} && npm run build -- --prod --base-href .
-
-      - name: Move dist to root for Docker build context
-        run: cp -r ${{ env.SERVICE_LOCATION }}/dist/${{ env.SERVICE_NAME }} ./dist
-
+      - uses: actions/checkout@v3
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
+        with:
+          ref: ${{ github.ref }}
+          java-version: 11
+          distribution: adopt
+          server-id: ossrh # Value of the distributionManagement/repository/id field of the pom.xml
+          settings-path: ${{ github.workspace }} # location for the settings.xml file
       - name: Setup branch and env
         run: |
           # Strip git ref prefix from version
           echo "BRANCH_NAME=$(echo ${{ github.ref }} | sed -e 's,.*/\(.*\),\1,')" >> $GITHUB_ENV
           echo "GPG_TTY=$(tty)" >> $GITHUB_ENV
-      - name: setup environment
+
+      - name: Setup branch and GPG public key
         run: |
           # Strip git ref prefix from version
-          echo "BRANCH_NAME=$(echo ${{ github.ref }} | sed -e 's,.*/\(.*\),\1,')" >> $GITHUB_ENV
+          echo ${{ env.BRANCH_NAME }}
+          echo ${{ env.GPG_TTY }}
+          sudo apt-get --yes install gnupg2
+      #        gpg2 --import ./.github/keys/mosipgpgkey_pub.gpg
+      #        gpg2 --quiet --batch --passphrase=${{secrets.gpg_secret}}  --allow-secret-key-import --import ./.github/keys/mosipgpgkey_sec.gpg
 
-      - name: Build Docker image
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-${{ env.BRANCH_NAME }}
+
+      - name: Install xmllint
         run: |
-          docker build . --file ${{ env.SERVICE_LOCATION }}/Dockerfile --tag ${{ env.SERVICE_NAME }}
+          sudo apt-get update
+          sudo apt-get install libxml2-utils
 
-      - name: Log into Docker registry
+      - name: Setup the settings file for ossrh server
+        run: echo "<settings>   <servers>      <server>        <id>ossrh</id>          <username>${{secrets.ossrh_user}}</username>          <password>${{secrets.ossrh_secret}}</password>       </server>    </servers>    <profiles>       <profile>          <id>ossrh</id>          <activation>             <activeByDefault>true</activeByDefault>          </activation>          <properties>             <gpg.executable>gpg2</gpg.executable>             <gpg.passphrase>${{secrets.gpg_secret}}</gpg.passphrase>          </properties>       </profile>       <profile>          <id>allow-snapshots</id>          <activation>             <activeByDefault>true</activeByDefault>          </activation>          <repositories>             <repository>                <id>snapshots-repo</id>                <url>https://oss.sonatype.org/content/repositories/snapshots</url>                <releases>                   <enabled>false</enabled>                </releases>                <snapshots>                   <enabled>true</enabled>                </snapshots>             </repository>             <repository>                <id>releases-repo</id>                <url>https://oss.sonatype.org/service/local/staging/deploy/maven2</url>                <releases>                   <enabled>true</enabled>                </releases>                <snapshots>                   <enabled>false</enabled>                </snapshots>             </repository>             <repository>                <id>danubetech-maven-public</id>                <url>https://repo.danubetech.com/repository/maven-public</url>             </repository>          </repositories>       </profile>       <profile>          <id>sonar</id>          <properties>             <sonar.sources>.</sonar.sources>             <sonar.host.url>https://sonarcloud.io</sonar.host.url>          </properties>          <activation>             <activeByDefault>false</activeByDefault>          </activation>       </profile>    </profiles> </settings>" > $GITHUB_WORKSPACE/settings.xml
+
+      - name: Build with Maven
+        run: |
+          cd authentication
+          mvn clean install -U -s $GITHUB_WORKSPACE/settings.xml -DskipTests -Dgpg.skip=true --file pom.xml
+
+      - name: Removing target jars
+        run: |
+          rm -rf $(find -name '*.jar' ! -executable -type f)
+
+      - name: ida Build image
+        run: |
+          cd "./${{env.SERVICE_LOCATION}}"
+          docker build . --file Dockerfile --tag ${{ env.SERVICE_NAME }}
+
+      - name: ida Log into registry
         run: echo "${{ secrets.release_docker_hub }}" | docker login -u ${{ secrets.actor_docker_hub }} --password-stdin
 
       - name: Push Docker image
@@ -49,8 +75,9 @@ jobs:
 
           # Change all uppercase to lowercase
           IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+          echo "push version ${{steps.getPomVersion.outputs.info}}"
           VERSION=$BRANCH_NAME
-          echo "Push version: $VERSION"
-          echo "Image ID: $IMAGE_ID"
+          echo IMAGE_ID=$IMAGE_ID
+          echo VERSION=$VERSION
           docker tag $SERVICE_NAME $IMAGE_ID:$VERSION
           docker push $IMAGE_ID:$VERSION
