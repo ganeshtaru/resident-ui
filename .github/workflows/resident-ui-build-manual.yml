@@ -1,6 +1,7 @@
-name: Resident ui manual push
+name: Resident UI Manual Push
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
 
 jobs:
   build-admin-ui:
@@ -22,6 +23,10 @@ jobs:
 
       - name: npm build
         run: cd ${{ env.SERVICE_LOCATION }} && npm run-script build -- --prod --base-href . --output-path=dist
+
+      - name: Move dist to root for Docker build context
+        run: cp -r ${{ env.SERVICE_LOCATION }}/dist ./dist
+
       - name: Setup branch and env
         run: |
           # Strip git ref prefix from version
@@ -32,15 +37,14 @@ jobs:
           # Strip git ref prefix from version
           echo "BRANCH_NAME=$(echo ${{ github.ref }} | sed -e 's,.*/\(.*\),\1,')" >> $GITHUB_ENV
 
-      - name: Build image
+      - name: Build Docker image
         run: |
-          cd "./${{env.SERVICE_LOCATION}}"
-          docker build . --file Dockerfile --tag ${{ env.SERVICE_NAME }}
+          docker build . --file ${{ env.SERVICE_LOCATION }}/Dockerfile --tag ${{ env.SERVICE_NAME }}
 
-      - name: Log into registry
+      - name: Log into Docker registry
         run: echo "${{ secrets.release_docker_hub }}" | docker login -u ${{ secrets.actor_docker_hub }} --password-stdin
 
-      - name: Push image
+      - name: Push Docker image
         run: |
           IMAGE_ID=$NAMESPACE/$SERVICE_NAME
 
