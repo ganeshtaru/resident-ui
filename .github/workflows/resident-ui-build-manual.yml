@@ -4,8 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-admin-ui:
-
+  build-resident-ui:
     runs-on: ubuntu-latest
     env:
       NAMESPACE: ${{ secrets.dev_namespace_docker_hub }}
@@ -22,10 +21,10 @@ jobs:
         run: cd ${{ env.SERVICE_LOCATION }} && npm install --ignore-scripts
 
       - name: npm build
-        run: cd ${{ env.SERVICE_LOCATION }} && npm run-script build -- --prod --base-href . --output-path=dist
+        run: cd ${{ env.SERVICE_LOCATION }} && npm run build -- --prod --base-href .
 
       - name: Move dist to root for Docker build context
-        run: cp -r ${{ env.SERVICE_LOCATION }}/dist ./dist
+        run: cp -r ${{ env.SERVICE_LOCATION }}/dist/${{ env.SERVICE_NAME }} ./dist
 
       - name: Setup branch and env
         run: |
@@ -51,8 +50,7 @@ jobs:
           # Change all uppercase to lowercase
           IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
           VERSION=$BRANCH_NAME
-          echo "push version $VERSION"
-          echo IMAGE_ID=$IMAGE_ID
-          echo VERSION=$VERSION
+          echo "Push version: $VERSION"
+          echo "Image ID: $IMAGE_ID"
           docker tag $SERVICE_NAME $IMAGE_ID:$VERSION
           docker push $IMAGE_ID:$VERSION
