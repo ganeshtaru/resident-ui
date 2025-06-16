@@ -22,10 +22,16 @@ jobs:
         run: cd ${{ env.SERVICE_LOCATION }} && npm install --ignore-scripts
 
       - name: Build frontend
-        run: cd ${{ env.SERVICE_LOCATION }} && npm run-script build -- --prod --base-href . --output-path=dist
+        run: |
+          cd ${{ env.SERVICE_LOCATION }}
+          npm run-script build -- --prod --base-href . --output-path=dist
+          echo "Build output:"
+          ls -la dist
 
       - name: Copy dist to root (if Dockerfile expects /dist)
-        run: cp -r ${{ env.SERVICE_LOCATION }}/dist ./dist
+        run: |
+          ls -la ${{ env.SERVICE_LOCATION }}/dist
+          cp -r ${{ env.SERVICE_LOCATION }}/dist ./dist
 
       - name: Setup branch and env
         run: |
