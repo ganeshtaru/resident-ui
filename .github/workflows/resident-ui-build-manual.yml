@@ -11,40 +11,38 @@ jobs:
       SERVICE_NAME: resident-ui
       SERVICE_LOCATION: resident-ui
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v3
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
-      - name: npm install
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+
+      - name: Install npm dependencies
         run: cd ${{ env.SERVICE_LOCATION }} && npm install --ignore-scripts
 
-      - name: npm build
+      - name: Build frontend
         run: cd ${{ env.SERVICE_LOCATION }} && npm run-script build -- --prod --base-href . --output-path=dist
+
+      - name: Copy dist to root (if Dockerfile expects /dist)
+        run: cp -r ${{ env.SERVICE_LOCATION }}/dist ./dist
+
       - name: Setup branch and env
         run: |
-          # Strip git ref prefix from version
           echo "BRANCH_NAME=$(echo ${{ github.ref }} | sed -e 's,.*/\(.*\),\1,')" >> $GITHUB_ENV
           echo "GPG_TTY=$(tty)" >> $GITHUB_ENV
-      - name: setup environment
-        run: |
-          # Strip git ref prefix from version
-          echo "BRANCH_NAME=$(echo ${{ github.ref }} | sed -e 's,.*/\(.*\),\1,')" >> $GITHUB_ENV
 
-      - name: Build image
+      - name: Build Docker image
         run: |
           cd "./${{env.SERVICE_LOCATION}}"
           docker build . --file Dockerfile --tag ${{ env.SERVICE_NAME }}
 
-      - name: Log into registry
+      - name: Log into Docker registry
         run: echo "${{ secrets.release_docker_hub }}" | docker login -u ${{ secrets.actor_docker_hub }} --password-stdin
 
-      - name: Push image
+      - name: Push Docker image
         run: |
           IMAGE_ID=$NAMESPACE/$SERVICE_NAME
-
-          # Change all uppercase to lowercase
           IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
           VERSION=$BRANCH_NAME
           echo "push version $VERSION"
